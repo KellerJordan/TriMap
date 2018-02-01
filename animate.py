@@ -45,7 +45,7 @@ def save_viz(dataset='mnist2500', optim='sgd', lr=None, animated=True):
         if i % 50 == 0:
             print('Animating, iteration %d / %d' % (i, len(Y_seq)))
         ax.clear()
-        ax.scatter(Y_seq[i][:, 0], Y_seq[i][:, 1], 20, labels)
+        ax.scatter(Y_seq[i][:, 0], Y_seq[i][:, 1], 1, labels)
         ax.set_title('%s (epoch %d)' % (optim, i))
         return ax, scatter
     

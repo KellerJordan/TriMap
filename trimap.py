@@ -32,6 +32,7 @@ class TriMapper(nn.Module):
         d_ij = 1 + torch.sum(y_ij**2, -1)
         d_ik = 1 + torch.sum(y_ik**2, -1)
         num_viol = torch.sum((d_ij > d_ik).type(torch.FloatTensor))
+#         loss = self.weights.dot(torch.log(1 + d_ij / d_ik))
         loss = self.weights.dot(d_ij / (d_ij + d_ik))
         return loss, num_viol
     
