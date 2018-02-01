@@ -55,7 +55,7 @@ class Wrapper:
         num_triplets = self.triplets.shape[0]
         
         if embed_init is None:
-            embed_init = 1 * np.random.normal(size=[self.X.shape[0], 2])
+            embed_init = 0.0001 * np.random.normal(size=[self.X.shape[0], 2])
         model = TriMapper(self.triplets, self.weights, out_shape=[num_examples, 2],
                           embed_init=embed_init)
         model.cuda()

@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+plt.rcParams['image.cmap'] = 'tab10'
 from matplotlib import animation
 from matplotlib.animation import FuncAnimation
 import torch
@@ -29,8 +30,10 @@ def save_viz(dataset='mnist2500', optim='sgd', lr=None, animated=True):
 
     trimap = TriMap(X)
     trimap.load_triplets('models/%s.pkl' % dataset) 
-    Y_seq = trimap.embed(num_iters=1000, optimizer=optim, return_seq=True, verbose=True)
-    
+    Y_seq = trimap.embed(num_iters=1000, embed_init=0.001*trimap.X[:, :2],
+                         optimizer=optim,
+                         return_seq=True, verbose=True)
+        
     fig, ax = plt.subplots()
     scatter = ax.scatter([], [], 20, [])
     ax.set_title('%s (epoch 0)' % optim)
@@ -56,7 +59,7 @@ def save_viz(dataset='mnist2500', optim='sgd', lr=None, animated=True):
     else:
         Y = Y_seq[-1]
         ax.clear()
-        ax.scatter(Y[:, 0], Y[:, 1], 20, labels)
+        ax.scatter(Y[:, 0], Y[:, 1], 1, labels)
         ax.set_title('%s' % optim)
         path = 'animations/%s.png' % optim
         print('Saving figure as %s' % path)
