@@ -1,3 +1,9 @@
+"""
+animate.py
+
+Python script to produce animated gifs of TriMap training
+"""
+
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -16,33 +22,13 @@ from trimap import Wrapper as TriMap
 
 def save_viz(dataset='mnist2500', optim='sgd', lr=None, animated=True):
     
-    if dataset == 'mnist2500':
-        X = np.loadtxt('data/%s_X.txt' % dataset)
-        labels = np.loadtxt('data/%s_labels.txt' % dataset)
-    elif dataset == 'mnist60000':
-        tsfm = transforms.Compose([transforms.ToTensor()])
-        mnist = datasets.MNIST('data', train=True, download=True, transform=tsfm)
-        X = (mnist.train_data.type(torch.FloatTensor) / 255.0).view(-1, 784).numpy()
-        labels = mnist.train_labels.numpy()
+    X = np.loadtxt('data/%s_X.txt' % dataset)
+    labels = np.loadtxt('data/%s_labels.txt' % dataset)
     
     print('Computing TriMap embedding using %s optimizer...' % optim)
 
     trimap = TriMap(X)
-    
-    triplets_path = 'models/%s_triplets.pkl' % dataset
-    
-    try:
-        with open(triplets_path, 'rb') as f:
-            triplets_init = pickle.load(f)
-            
-        trimap.triplets, trimap.weights = triplets_init
-    except:
-        trimap.generate_triplets(verbose=True)
-        triplets_state = (trimap.triplets, trimap.weights)
-        
-        with open(triplets_path, 'wb') as f:
-            pickle.dump(triplets_state, f)
-        
+    trimap.load_triplets('models/%s.pkl' % dataset) 
     Y_seq = trimap.embed(num_iters=1000, optimizer=optim, return_seq=True, verbose=True)
     
     fig, ax = plt.subplots()

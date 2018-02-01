@@ -17,12 +17,12 @@ from torch.autograd import Variable
 
 class TriMapper(nn.Module):
     
-    def __init__(self, triplets, weights, out_shape):
+    def __init__(self, triplets, weights, out_shape, embed_init):
         super(TriMapper, self).__init__()
         n, num_dims = out_shape
         self.Y = nn.Embedding(n, num_dims, sparse=False)
-        for W in self.Y.parameters():
-            W.data = torch.Tensor(np.random.normal(size=[n, num_dims]) * 0.0001)
+        self.Y.weight.data = torch.Tensor(embed_init)
+        
         self.triplets = Variable(torch.cuda.LongTensor(triplets))
         self.weights = Variable(torch.cuda.FloatTensor(weights))
     
@@ -36,38 +36,50 @@ class TriMapper(nn.Module):
         return loss, num_viol
     
     def get_embeddings(self):
-        return self.Y._parameters['weight'].cpu().data.numpy()
+        return self.Y.weight.data.cpu().numpy()
 
 
 class Wrapper:
     
-    def __init__(self, X):
-        self.X = X
+    def __init__(self, X, input_dim=50):
+        X -= np.min(X)
+        X /= np.max(X)
+        X -= np.mean(X, axis=0)
+        self.X = TruncatedSVD(n_components=input_dim, random_state=0).fit_transform(X)
         
-    def embed(self, num_iters=2000, optimizer='sgd', lr=None,
+    def embed(self, num_iters=2000, embed_init=None,
+              optimizer='sgd', lr=None,
               return_seq=False, verbose=False):
 
         num_examples = self.X.shape[0]
         num_triplets = self.triplets.shape[0]
-        model = TriMapper(self.triplets, self.weights, out_shape=[num_examples, 2])
+        
+        if embed_init is None:
+            embed_init = 1 * np.random.normal(size=[self.X.shape[0], 2])
+        model = TriMapper(self.triplets, self.weights, out_shape=[num_examples, 2],
+                          embed_init=embed_init)
         model.cuda()
 
         tol = 1e-7
         C = np.inf
+        best_C = np.inf
+        best_Y = None
 
         if lr == None:
-            eta = 1000.0 / num_triplets * num_examples
+            eta = num_examples * 1000.0 / num_triplets
+        else:
+            eta = lr
 
         if optimizer == 'sgd':
-            optimizer = optim.SGD(model.parameters(), lr=eta)
+            trainer = optim.SGD(model.parameters(), lr=eta)
         elif optimizer == 'sgd-momentum':
-            optimizer = optim.SGD(model.parameters(), lr=eta, momentum=.9)
+            trainer = optim.SGD(model.parameters(), lr=eta, momentum=.9)
         elif optimizer == 'adam':
-            optimizer = optim.Adam(model.parameters())
+            trainer = optim.Adam(model.parameters(), lr=eta)
         elif optimizer == 'adadelta':
-            optimizer = optim.Adadelta(model.parameters(), lr=eta)
+            trainer = optim.Adadelta(model.parameters(), lr=eta)
         elif optimizer == 'rmsprop':
-            optimizer = optim.RMSprop(model.parameters())
+            trainer = optim.RMSprop(model.parameters(), lr=eta)
 
         if return_seq:
             Y_seq = []
@@ -76,30 +88,40 @@ class Wrapper:
             old_C = C
 
             loss, num_viol = model()
-            optimizer.zero_grad()
+            trainer.zero_grad()
             loss.backward()
-            optimizer.step()
-
+            trainer.step()
+            
             C = loss.data.cpu().numpy()
             viol = float(num_viol) / num_triplets
-
+            
             if optimizer in ['sgd', 'sgd-momentum']:
-                if old_C > C + tol:
-                    eta = eta * 1.01
+                if old_C < C - tol:
+                    eta *= 0.9
                 else:
-                    eta = eta * 0.5
-                optimizer.param_groups[0]['lr'] = eta
+                    eta *= 1.01
+                trainer.param_groups[0]['lr'] = eta
 
             if return_seq:
                 Y = model.get_embeddings()
                 Y_seq.append(Y)
+            
+            if C < best_C:
+                best_C = C
+                best_Y = model.get_embeddings()
 
             if verbose and (i+1) % 100 == 0:
                 print('Iteration: %4d, Loss: %3.3f, Violated triplets: %0.4f' % (i+1, loss, viol))
 
-        Y = model.get_embeddings()
-
-        return Y_seq if return_seq else Y
+        return Y_seq if return_seq else best_Y
+    
+    def save_triplets(self, path):
+        with open(path, 'wb') as f:
+            pickle.dump((self.triplets, self.weights), f)
+    
+    def load_triplets(self, path):
+        with open(path, 'rb') as f:
+            self.triplets, self.weights = pickle.load(f)
     
     def generate_triplets(self, kin=50, kout=10, kr=5,
                           weight_adj=False, random_triplets=True, verbose=False):
@@ -110,7 +132,7 @@ class Wrapper:
         @author: ehsanamid
         """
         
-        X = TruncatedSVD(n_components=5).fit_transform(self.X)
+        X = self.X
         
         num_extra = np.maximum(kin+50, 60) # look up more neighbors
         # ^ ???
@@ -173,6 +195,6 @@ class Wrapper:
             weights = np.log(1 + 50 * weights)
             weights /= np.max(weights)
         
-        self.triplets = triplets
+        self.triplets = triplets.astype(int)
         self.weights = weights
         # do some pickling
