@@ -17,7 +17,7 @@ from torch.autograd import Variable
 
 class TriMapper(nn.Module):
     
-    def __init__(self, triplets, weights, out_shape, embed_init):
+    def __init__(self, triplets, weights, out_shape, embed_init, t=2):
         super(TriMapper, self).__init__()
         n, num_dims = out_shape
         self.Y = nn.Embedding(n, num_dims, sparse=False)
@@ -25,6 +25,8 @@ class TriMapper(nn.Module):
         
         self.triplets = Variable(torch.cuda.LongTensor(triplets))
         self.weights = Variable(torch.cuda.FloatTensor(weights))
+        
+        self.t = t
     
     def forward(self):
         y_ij = self.Y(self.triplets[:, 0]) - self.Y(self.triplets[:, 1])
@@ -33,8 +35,13 @@ class TriMapper(nn.Module):
         d_ik = 1 + torch.sum(y_ik**2, -1)
         num_viol = torch.sum((d_ij > d_ik).type(torch.FloatTensor))
 #         loss = self.weights.dot(torch.log(1 + d_ij / d_ik))
-        loss = self.weights.dot(d_ij / (d_ij + d_ik))
+#         loss = self.weights.dot(d_ij / (d_ij + d_ik))
+        ratio = d_ij / d_ik
+        loss = self.weights.dot(self.log_t(ratio))
         return loss, num_viol
+    
+    def log_t(self, l):
+        return 1 - 1 / (1 + l)**(self.t - 1)
     
     def get_embeddings(self):
         return self.Y.weight.data.cpu().numpy()
@@ -42,11 +49,15 @@ class TriMapper(nn.Module):
 
 class Wrapper:
     
-    def __init__(self, X, input_dim=50):
+    def __init__(self, X, input_dim=50, t=2):
         X -= np.min(X)
         X /= np.max(X)
         X -= np.mean(X, axis=0)
-        self.X = TruncatedSVD(n_components=input_dim, random_state=0).fit_transform(X)
+        if input_dim:
+            self.X = TruncatedSVD(n_components=input_dim, random_state=0).fit_transform(X)
+        else:
+            self.X = X
+        self.t = t
         
     def embed(self, num_iters=2000, embed_init=None,
               optimizer='sgd', lr=None,
@@ -58,7 +69,7 @@ class Wrapper:
         if embed_init is None:
             embed_init = 0.0001 * np.random.normal(size=[self.X.shape[0], 2])
         model = TriMapper(self.triplets, self.weights, out_shape=[num_examples, 2],
-                          embed_init=embed_init)
+                          embed_init=embed_init, t=self.t)
         model.cuda()
 
         tol = 1e-7
@@ -196,6 +207,6 @@ class Wrapper:
             weights = np.log(1 + 50 * weights)
             weights /= np.max(weights)
         
-        self.triplets = triplets.astype(int)
+        self.triplets = triplets
         self.weights = weights
         # do some pickling
